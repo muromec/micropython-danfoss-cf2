@@ -2,27 +2,13 @@ import uasyncio
 import config
 import time
 import machine
+from machine import Timer
 
 from heat import Heat
 from adapter import Adapter
 import umqttsimple
+import wrapq
  
-print('starting radio')
-h = Heat()
-
-mqtt = umqttsimple.MQTTClient(*config.mqtt_config)
-
-radio_flag = uasyncio.ThreadSafeFlag()
-radio_lock = uasyncio.Lock()
-radio_q = []
-
-def radio_frame(data):
-  radio_q.append(data)
-  radio_flag.set()
-  print('got radio', time.ticks_cpu(), 'q size', len(radio_q))
-
-h.radio._data_cb = radio_frame
-
 def panic(f):
   def wrapped(*a):
     try:
@@ -36,6 +22,10 @@ def panic(f):
   return wrapped
 
 async def main():
+  h = Heat()
+  mqtt = umqttsimple.MQTTClient(*config.mqtt_config)
+  h.propagate = panic(wrapq.wrap(h._propagate))
+
   await mqtt.connect()
 
   for zone in [2, 3, 4, 6, 8]: ## autodiscover
@@ -46,25 +36,28 @@ async def main():
   while True:
     await mqtt.wait_msg()
 
-@panic
-async def radio_events():
-  while True:
-    while radio_q:
-      await h.handle_frame(radio_q.pop())
+async def wd():
+  timer = Timer(0)
+  last_tick = time.ticks_ms()
+  def check(timer):
+    lag = (time.ticks_ms() - last_tick) / 5_000
+    if lag > 1.5:
+      print('lag', lag)
+    if lag > 10:
+      print('watchdog detected a stall of ', lag, last_tick, time.ticks_ms())
+      machine.reset()
+    
+  timer.init(period=10_000,  mode=Timer.PERIODIC, callback=check)
 
-    print('wait for next even..', time.ticks_cpu())
-    await radio_flag.wait()
-
-async def tick():
   while True:
-    await uasyncio.sleep_ms(5000)
-    print('tick...', time.ticks_cpu())
+    await uasyncio.sleep_ms(5_000)
+    last_tick = time.ticks_ms()
     #await mqtt.ping()
 
 @panic
 def run():
   loop = uasyncio.get_event_loop()
-  loop.run_until_complete(uasyncio.gather(main(), radio_events(), tick()))
+  loop.run_until_complete(uasyncio.gather(main(), wd()))
   machine.reset()
 
 run()

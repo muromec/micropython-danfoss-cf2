@@ -13,6 +13,7 @@ class Adapter:
     self.heat = heat
     self.zone = zone_id
     self.last_speed = None
+    self.target = None
 
   @property
   def topic_prefix(self):
@@ -47,11 +48,12 @@ class Adapter:
     self.mqtt.set_callback(self.handle_mqtt)
     await self.mqtt.subscribe(self.set_mode_topic)
     await self.mqtt.subscribe(self.set_temp_topic)
-    print('subscribed to mqtt')
+    #print('subscribed to mqtt')
 
     data = ujson.dumps(self.config_data)
     await self.mqtt.publish(self.config_topic, data)
-    print('advertise to mqtt')
+    await self.heat.query_target(self.zone)
+    #print('advertise to mqtt')
 
   async def handle_mqtt(self, topic, msg):
     topic_str = str(topic, 'latin')
@@ -59,7 +61,7 @@ class Adapter:
     print('mqtt', topic_str, msg)
     # setting mode and temperature does not work
     if topic_str == self.set_mode_topic:
-      await self.heat.conf14(self.zone)
+      await self.heat.query_target(self.zone)
       if msg == 'heat':
         await self.heat.set_temp(self.zone, 24)
       else:
@@ -68,10 +70,9 @@ class Adapter:
       print('set temp to', msg, 'on', self.zone)
 
       try:
-        await self.heat.conf14(self.zone)
-        is_ok = await self.heat.set_temp(self.zone, float(msg))
-        if is_ok:
-          await self.handle_event('target_temp', int(float(msg)))
+        await self.heat.query_target(self.zone)
+        await self.heat.set_temp(self.zone, float(msg))
+        await self.heat.query_target(self.zone)
       except Exception as e:
         print('failed to set temp', self.zone, msg, e)
         import sys
@@ -81,11 +82,13 @@ class Adapter:
     print('heater produced event', name, data)
     if name == 'temp':
       await self.mqtt.publish(self.temp_topic, str(data))
+      if self.target is not None:
+        state = data < self.target
+        await self.mqtt.publish(self.mode_topic, 'heat' if state else 'off')
     elif name == 'target_temp':
+      self.target = data
       await self.mqtt.publish(self.target_temp_topic, str(data))
-    elif name == 'state':
-      await self.mqtt.publish(self.mode_topic, str(data))
-    else:
-      print('something changed on a heater', name, data)
-
-    # self.mqtt.publish(self.mode_topic, 'OFF')
+    #elif name == 'state':
+    #  await self.mqtt.publish(self.mode_topic, str(data))
+    #else:
+    #  print('something changed on a heater', name, data)

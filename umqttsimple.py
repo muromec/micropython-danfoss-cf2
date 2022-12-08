@@ -1,6 +1,6 @@
 import time
 import ustruct as struct
-from ubinascii import hexlify
+#from ubinascii import hexlify
 import uasyncio
 
 class MQTTException(Exception):
@@ -9,12 +9,12 @@ class MQTTException(Exception):
 def locked(lock, op_name):
   def decorator(f):
     async def wrapped(*a):
-      print('mqtt op', op_name, 'need a lock')
+      #print('mqtt op', op_name, 'need a lock')
       await lock.acquire()
       try:
         return await f(*a)
       finally:
-        print('mqtt op', op_name, 'lock release')
+        #print('mqtt op', op_name, 'lock release')
         lock.release()
     return wrapped
 
@@ -70,7 +70,7 @@ class MQTTClient:
             try:
                 await cb(topic, msg)
             except Exception as e:
-                print('failed process callback for', topic, msg)
+                #print('failed process callback for', topic, msg)
                 import sys
                 sys.print_exception(e)
 
@@ -133,7 +133,7 @@ class MQTTClient:
 
     @locked(lock, 'ping')
     async def ping(self):
-        print('ping')
+        #print('ping')
         await self._write(b"\xc0\0")
 
     @locked(lock, 'pub')
@@ -196,9 +196,9 @@ class MQTTClient:
     # set by .set_callback() method. Other (internal) MQTT
     # messages processed internally.
     async def wait_msg(self):
-        print('wait msg...', time.ticks_cpu())
+        #print('wait msg...', time.ticks_cpu())
         res = await self._read(1)
-        print('mqtt got', res[0] if res else res)
+        #print('mqtt got', res[0] if res else res)
         if res is None:
             return None
         if res == b"":
@@ -207,7 +207,7 @@ class MQTTClient:
             buf = await self._read(1)
             sz = buf[0]
             assert sz == 0
-            print('got pong')
+            #print('got pong')
             return None
 
         op = res[0]
@@ -228,11 +228,11 @@ class MQTTClient:
                 sz -= 2
 
             msg = await self._read(sz)
-            print('got msg', topic, msg)
+            #print('got msg', topic, msg)
 
             if op & 6 == 2:
                 pkt = bytearray(b"\x40\x02\0\0")
-                print('do mqtt ack')
+                #print('do mqtt ack')
                 struct.pack_into("!H", pkt, 2, pid)
                 await self._write(pkt)
             elif op & 6 == 4:
